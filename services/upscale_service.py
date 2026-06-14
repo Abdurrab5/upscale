@@ -1,7 +1,6 @@
 import os
 import subprocess
 import json
-from PIL import Image
 
 
 # ----------------------------
@@ -18,22 +17,29 @@ def update_progress(job_id, percent, message):
 
 
 # ----------------------------
-# Normalize image (ensures compatibility)
+# OPTIONAL: normalize ONLY if needed
 # ----------------------------
 def normalize_image(input_path):
+    ext = os.path.splitext(input_path)[1].lower()
+
+    # skip conversion if already safe format
+    if ext in [".png", ".jpg", ".jpeg"]:
+        return input_path
+
+    from PIL import Image
+
     img = Image.open(input_path).convert("RGB")
+    new_path = input_path + "_normalized.png"
+    img.save(new_path, "PNG")
 
-    normalized_path = input_path + "_normalized.png"
-    img.save(normalized_path, "PNG")
-
-    return normalized_path
+    return new_path
 
 
 # ----------------------------
-# Real-ESRGAN single run
+# Run Real-ESRGAN
 # ----------------------------
 def run_realesrgan(exe_path, input_path, output_path, scale):
-    command = [
+    cmd = [
         exe_path,
         "-i", input_path,
         "-o", output_path,
@@ -41,29 +47,21 @@ def run_realesrgan(exe_path, input_path, output_path, scale):
         "-n", "realesrgan-x4plus"
     ]
 
-    result = subprocess.run(
-        command,
-        capture_output=True,
-        text=True
-    )
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        raise Exception(
-            f"RealESRGAN failed\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
-        )
+        raise Exception(result.stderr)
 
     return output_path
 
 
 # ----------------------------
-# 8x pipeline (2x + 4x or 4x + 2x)
+# 8x pipeline
 # ----------------------------
 def upscale_8x(exe_path, img_path):
-    # step 1: 4x
     mid = img_path + "_4x.png"
     run_realesrgan(exe_path, img_path, mid, 4)
 
-    # step 2: 2x on result = 8x total
     final = img_path + "_8x.png"
     run_realesrgan(exe_path, mid, final, 2)
 
@@ -71,7 +69,7 @@ def upscale_8x(exe_path, img_path):
 
 
 # ----------------------------
-# Main service
+# MAIN SERVICE
 # ----------------------------
 def upscale_image(input_path, scale, job_id):
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -83,38 +81,27 @@ def upscale_image(input_path, scale, job_id):
     )
 
     if not os.path.exists(exe_path):
-        raise Exception("Real-ESRGAN executable not found")
+        raise Exception("Real-ESRGAN not found")
 
-    update_progress(job_id, 10, "Normalizing image")
+    update_progress(job_id, 10, "Preparing image")
 
     input_path = normalize_image(input_path)
 
-    update_progress(job_id, 30, "Running AI upscale")
+    update_progress(job_id, 30, "Running AI model")
 
     name, _ = os.path.splitext(input_path)
 
-    # ----------------------------
-    # 2x / 4x direct
-    # ----------------------------
     if scale in [2, 4]:
         output_path = f"{name}_{scale}x.png"
         run_realesrgan(exe_path, input_path, output_path, scale)
 
-    # ----------------------------
-    # 8x pipeline
-    # ----------------------------
     elif scale == 8:
         update_progress(job_id, 50, "Running 4x stage")
         output_path = upscale_8x(exe_path, input_path)
 
     else:
-        raise Exception("Unsupported scale. Use 2, 4, or 8")
+        raise Exception("Unsupported scale")
 
-    update_progress(job_id, 90, "Finalizing output")
-
-    if not os.path.exists(output_path):
-        raise Exception(f"Output not created: {output_path}")
-
-    update_progress(job_id, 100, "Completed")
+    update_progress(job_id, 100, "Done")
 
     return output_path

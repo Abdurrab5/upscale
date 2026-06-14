@@ -1,48 +1,59 @@
-from fastapi import APIRouter, UploadFile, File, Form
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import Response, JSONResponse
 import shutil
 import uuid
 import os
-import traceback
 import json
-from fastapi.responses import Response
 from services.upscale_service import upscale_image
 
 router = APIRouter()
 
 PROGRESS_DIR = "progress"
 os.makedirs(PROGRESS_DIR, exist_ok=True)
+
+
+# ----------------------------
+# Progress update
+# ----------------------------
 def update_progress(job_id, percent, message):
-
-    with open(
-    os.path.join(PROGRESS_DIR, f"{job_id}.json"),
-    "w"
-    )as f:
-
+    with open(f"{PROGRESS_DIR}/{job_id}.json", "w") as f:
         json.dump({
             "percent": percent,
             "message": message
         }, f)
 
+
+# ----------------------------
+# Cleanup function
+# ----------------------------
+def clean_files(*paths):
+    for path in paths:
+        if path and os.path.exists(path):
+            os.remove(path)
+
+    # remove progress file
+    job_id = paths[-1]
+    progress_file = f"{PROGRESS_DIR}/{job_id}.json"
+    if os.path.exists(progress_file):
+        os.remove(progress_file)
+
+
+# ----------------------------
+# Progress endpoint
+# ----------------------------
 @router.get("/progress/{job_id}")
-
 def progress(job_id: str):
-
-    path = os.path.join(
-    PROGRESS_DIR,
-    f"{job_id}.json"
-    )
+    path = f"{PROGRESS_DIR}/{job_id}.json"
 
     if not os.path.exists(path):
-        return {
-            "percent": 0,
-            "message": "Waiting"
-        }
+        return {"percent": 0, "message": "Waiting"}
 
     with open(path, "r") as f:
         return json.load(f)
+    
 @router.post("/upscale")
 async def upscale(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     scale: int = Form(4),
     job_id: str = Form(...)
@@ -56,44 +67,42 @@ async def upscale(
     try:
         update_progress(job_id, 5, "Uploading image")
 
+        # save file
         with open(input_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        update_progress(job_id, 10, "Image received")
+        update_progress(job_id, 15, "Processing started")
 
+        # run AI upscale
         output_path = upscale_image(input_path, scale, job_id)
 
-        update_progress(job_id, 100, "Completed")
+        update_progress(job_id, 90, "Finalizing")
 
-        # 🔥 FIX: convert to absolute path
         abs_output_path = os.path.abspath(output_path)
 
         if not os.path.exists(abs_output_path):
             return JSONResponse(
                 status_code=500,
-                content={"error": "Output file not found", "path": abs_output_path}
+                content={"error": "Output not found"}
             )
 
-        
-
+        # read result
         with open(abs_output_path, "rb") as f:
             image_bytes = f.read()
 
-            return Response(
-             content=image_bytes,
-             media_type="image/png"
-                )
-
-    except Exception as e:
-        traceback.print_exc()
-
-        update_progress(job_id, 0, f"Error: {str(e)}")
-
-        return JSONResponse(
-            status_code=500,
-            content={"error": str(e)}
+        # schedule cleanup AFTER response
+        background_tasks.add_task(
+            clean_files,
+            input_path,
+            output_path,
+            job_id
         )
 
-    finally:
-        if os.path.exists(input_path):
-            os.remove(input_path)
+        return Response(
+            content=image_bytes,
+            media_type="image/png"
+        )
+
+    except Exception as e:
+        update_progress(job_id, 0, f"Error: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
