@@ -1,8 +1,38 @@
 import os
+import platform
 import subprocess
 import json
 from PIL import Image
 
+# ----------------------------
+# Paths
+# ----------------------------
+
+BASE_DIR = os.path.dirname(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
+)
+
+if platform.system() == "Windows":
+    EXE_NAME = "realesrgan-ncnn-vulkan.exe"
+else:
+    EXE_NAME = "realesrgan-ncnn-vulkan"
+
+EXE_PATH = os.path.join(
+    BASE_DIR,
+    "realesrgan",
+    EXE_NAME
+)
+
+# Linux execute permission
+if platform.system() != "Windows" and os.path.exists(EXE_PATH):
+    os.chmod(EXE_PATH, 0o755)
+
+
+# ----------------------------
+# Progress updater
+# ----------------------------
 
 def update_progress(job_id, percent, message):
     os.makedirs("progress", exist_ok=True)
@@ -17,6 +47,10 @@ def update_progress(job_id, percent, message):
         )
 
 
+# ----------------------------
+# Normalize image
+# ----------------------------
+
 def normalize_image(input_path):
     ext = os.path.splitext(input_path)[1].lower()
 
@@ -25,16 +59,29 @@ def normalize_image(input_path):
 
     img = Image.open(input_path).convert("RGB")
 
-    new_path = input_path + "_normalized.png"
+    normalized_path = input_path + "_normalized.png"
 
-    img.save(new_path, "PNG")
+    img.save(normalized_path, "PNG")
 
-    return new_path
+    return normalized_path
 
 
-def run_x4(exe_path, input_path, output_path):
+# ----------------------------
+# Run RealESRGAN x4
+# ----------------------------
+
+def run_x4(input_path, output_path):
+
+    print("Executable:", EXE_PATH)
+    print("Exists:", os.path.exists(EXE_PATH))
+
+    if not os.path.exists(EXE_PATH):
+        raise Exception(
+            f"RealESRGAN executable not found: {EXE_PATH}"
+        )
+
     cmd = [
-        exe_path,
+        EXE_PATH,
         "-i", input_path,
         "-o", output_path,
         "-s", "4",
@@ -48,13 +95,23 @@ def run_x4(exe_path, input_path, output_path):
         text=True
     )
 
+    print("STDOUT:", result.stdout)
+    print("STDERR:", result.stderr)
+
     if result.returncode != 0:
-        raise Exception(result.stderr)
+        raise Exception(
+            f"RealESRGAN failed:\n{result.stderr}"
+        )
 
     return output_path
 
 
+# ----------------------------
+# Generate 2x / 4x / 8x
+# ----------------------------
+
 def generate_multi_scale(x4_image_path, base_path):
+
     img = Image.open(x4_image_path)
 
     w, h = img.size
@@ -82,51 +139,55 @@ def generate_multi_scale(x4_image_path, base_path):
     }
 
 
+# ----------------------------
+# Main Upscale Function
+# ----------------------------
+
 def upscale_image(input_path, scale, job_id):
 
-    BASE_DIR = os.path.dirname(
-        os.path.dirname(
-            os.path.abspath(__file__)
-        )
+    update_progress(
+        job_id,
+        10,
+        "Preparing image"
     )
-
-    exe_path = os.path.join(
-        BASE_DIR,
-        "realesrgan",
-        "realesrgan-ncnn-vulkan.exe"
-    )
-
-    if not os.path.exists(exe_path):
-        raise Exception("RealESRGAN executable not found")
-
-    update_progress(job_id, 10, "Preparing image")
 
     input_path = normalize_image(input_path)
 
-    update_progress(job_id, 30, "Running AI upscale")
+    update_progress(
+        job_id,
+        30,
+        "Running AI upscale"
+    )
 
     name, _ = os.path.splitext(input_path)
 
     x4_output = f"{name}_x4_ai.png"
 
     run_x4(
-        exe_path,
         input_path,
         x4_output
     )
 
-    update_progress(job_id, 70, "Generating requested scale")
+    update_progress(
+        job_id,
+        70,
+        "Generating requested scale"
+    )
 
     outputs = generate_multi_scale(
         x4_output,
         name
     )
 
-    selected = outputs.get(f"{scale}x")
+    selected = outputs.get(
+        f"{scale}x",
+        outputs["4x"]
+    )
 
-    if not selected:
-        selected = outputs["4x"]
-
-    update_progress(job_id, 100, "Done")
+    update_progress(
+        job_id,
+        100,
+        "Done"
+    )
 
     return selected
