@@ -37,7 +37,15 @@ def clean_files(*paths):
             except:
                 pass
 
+@router.get("/debug")
+def debug():
 
+    exe = "/app/realesrgan/realesrgan-ncnn-vulkan.exe"
+
+    return {
+        "exists": os.path.exists(exe),
+        "size": os.path.getsize(exe) if os.path.exists(exe) else 0,
+    }
 @router.get("/progress/{job_id}")
 def progress(job_id: str):
 
