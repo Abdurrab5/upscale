@@ -2,31 +2,11 @@ import os
 import platform
 import subprocess
 import json
-import shutil
 from PIL import Image
-
-# =========================
-# BASE PATH
-# =========================
 
 BASE_DIR = os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))
 )
-
-# =========================
-# DETECT GPU / VULKAN
-# =========================
-
-def has_vulkan():
-    try:
-        result = subprocess.run(
-            ["vulkaninfo"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        return result.returncode == 0
-    except:
-        return False
 
 
 # =========================
@@ -34,54 +14,59 @@ def has_vulkan():
 # =========================
 
 def get_exe():
+
     system = platform.system()
 
-    gpu_path = os.path.join(
+    if system == "Windows":
+
+        exe = os.path.join(
+            BASE_DIR,
+            "realesrgan",
+            "realesrgan-ncnn-vulkan.exe"
+        )
+
+        if not os.path.exists(exe):
+            raise Exception(f"Binary not found: {exe}")
+
+        return exe
+
+    exe = os.path.join(
         BASE_DIR,
         "realesrgan",
-        "gpu_vulkan",
         "realesrgan-ncnn-vulkan"
     )
 
-    cpu_path = os.path.join(
-        BASE_DIR,
-        "realesrgan",
-        "cpu",
-        "realesrgan-ncnn-cpu"
-    )
+    if not os.path.exists(exe):
+        raise Exception(f"Binary not found: {exe}")
 
-    if system == "Windows":
-        return gpu_path + ".exe"
-
-    # Linux / servers
-    if os.path.exists(gpu_path) and has_vulkan():
-        return gpu_path
-
-    return cpu_path
+    return exe
 
 
 EXE_PATH = get_exe()
-
-
 # =========================
 # PROGRESS
 # =========================
 
 def update_progress(job_id, percent, message):
+
     os.makedirs("progress", exist_ok=True)
 
     with open(f"progress/{job_id}.json", "w") as f:
         json.dump(
-            {"percent": percent, "message": message},
+            {
+                "percent": percent,
+                "message": message
+            },
             f
         )
 
 
 # =========================
-# IMAGE NORMALIZATION
+# NORMALIZE
 # =========================
 
 def normalize_image(path):
+
     ext = os.path.splitext(path)[1].lower()
 
     if ext in [".png", ".jpg", ".jpeg", ".webp"]:
@@ -89,20 +74,41 @@ def normalize_image(path):
 
     img = Image.open(path).convert("RGB")
 
-    out = path + "_normalized.png"
-    img.save(out, "PNG")
+    normalized = path + "_normalized.png"
 
-    return out
+    img.save(normalized, "PNG")
+
+    return normalized
 
 
 # =========================
-# REAL ESRGAN RUNNER (OPTIMIZED)
+# AUTO TILE SIZE
+# =========================
+
+def get_tile_size(image_path):
+
+    img = Image.open(image_path)
+
+    w, h = img.size
+
+    pixels = w * h
+
+    if pixels <= 2_000_000:
+        return "128"
+
+    if pixels <= 8_000_000:
+        return "256"
+
+    return "512"
+
+
+# =========================
+# REAL ESRGAN
 # =========================
 
 def run_realesrgan(input_path, output_path):
 
-    if not os.path.exists(EXE_PATH):
-        raise Exception(f"Engine not found: {EXE_PATH}")
+    tile_size = get_tile_size(input_path)
 
     cmd = [
         EXE_PATH,
@@ -110,70 +116,53 @@ def run_realesrgan(input_path, output_path):
         "-o", output_path,
         "-n", "realesrgan-x4plus",
         "-s", "4",
-        "-t", "256",          # tile size (IMPORTANT for large images)
-        "-j", "4:4:4",        # threads optimization
+        "-t", tile_size,
+        "-j", "4:4:4"
     ]
 
     result = subprocess.run(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True
     )
 
     if result.returncode != 0:
-        raise Exception(result.stderr)
+        raise Exception(
+            f"STDERR:\n{result.stderr}\n\nSTDOUT:\n{result.stdout}"
+        )
+
+    if not os.path.exists(output_path):
+        raise Exception(
+            f"Output not generated: {output_path}"
+        )
 
     return output_path
 
 
 # =========================
-# MULTI SCALE GENERATION
+# MAIN
 # =========================
 
-def generate_multi_scale(x4_path, base):
-
-    img = Image.open(x4_path)
-    w, h = img.size
-
-    out_2x = base + "_2x.png"
-    out_4x = base + "_4x.png"
-    out_8x = base + "_8x.png"
-
-    img.resize((w // 2, h // 2), Image.LANCZOS).save(out_2x)
-    img.save(out_4x)
-    img.resize((w * 2, h * 2), Image.LANCZOS).save(out_8x)
-
-    return {
-        "2x": out_2x,
-        "4x": out_4x,
-        "8x": out_8x
-    }
-
-
-# =========================
-# MAIN UPSCALE PIPELINE
-# =========================
-
-def upscale_image(input_path, scale, job_id):
+def upscale_image(input_path, job_id):
 
     update_progress(job_id, 5, "Starting")
 
-    input_path = normalize_image(input_path)
+    normalized_input = normalize_image(input_path)
 
-    update_progress(job_id, 20, "Processing image")
+    update_progress(job_id, 20, "Upscaling image")
 
-    name, _ = os.path.splitext(input_path)
-    x4_output = f"{name}_x4.png"
+    name, _ = os.path.splitext(normalized_input)
 
-    run_realesrgan(input_path, x4_output)
+    output_path = f"{name}_x4.png"
 
-    update_progress(job_id, 70, "Generating scales")
+    run_realesrgan(
+        normalized_input,
+        output_path
+    )
 
-    outputs = generate_multi_scale(x4_output, name)
+    update_progress(job_id, 100, "Completed")
 
-    selected = outputs.get(f"{scale}x", outputs["4x"])
-
-    update_progress(job_id, 100, "Done")
-
-    return selected
+    return {
+        "output_path": output_path,
+        "normalized_input": normalized_input
+    }

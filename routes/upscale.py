@@ -37,12 +37,19 @@ def update_progress(job_id, percent, message):
 # ----------------------------
 
 def clean_files(*paths):
-    for path in paths:
-        if path and os.path.exists(path):
-            try:
+
+    for path in set(paths):
+
+        try:
+
+            if path and os.path.exists(path):
                 os.remove(path)
-            except Exception:
-                pass
+
+        except Exception as e:
+
+            print(
+                f"Cleanup failed: {path} -> {str(e)}"
+            )
 
 
 # ----------------------------
@@ -72,17 +79,14 @@ def progress(job_id: str):
 async def upscale(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    scale: int = Form(4),
     job_id: str = Form(...)
 ):
-
-    if scale not in [2, 4, 8]:
-        scale = 4
 
     ext = os.path.splitext(file.filename)[1].lower()
     input_path = f"temp_{uuid.uuid4().hex}{ext}"
 
     try:
+
         update_progress(job_id, 5, "Uploading image")
 
         with open(input_path, "wb") as buffer:
@@ -90,14 +94,18 @@ async def upscale(
 
         update_progress(job_id, 15, "Processing started")
 
-        output_path = upscale_image(
+        result = upscale_image(
             input_path,
-            scale,
             job_id
         )
 
+        output_path = result["output_path"]
+        normalized_input = result["normalized_input"]
+
         if not os.path.exists(output_path):
-            raise Exception(f"Output not found: {output_path}")
+            raise Exception(
+                f"Output not found: {output_path}"
+            )
 
         with open(output_path, "rb") as f:
             image_bytes = f.read()
@@ -105,6 +113,7 @@ async def upscale(
         background_tasks.add_task(
             clean_files,
             input_path,
+            normalized_input,
             output_path
         )
 
@@ -114,6 +123,7 @@ async def upscale(
         )
 
     except Exception as e:
+
         print("UPSCALE ERROR:")
         print(traceback.format_exc())
 
