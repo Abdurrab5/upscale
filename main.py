@@ -14,6 +14,9 @@ app.add_middleware(
 )
 
 app.include_router(upscale.router)
+
+
+
 @app.get("/test-esrgan")
 def test_esrgan():
     result = subprocess.run(

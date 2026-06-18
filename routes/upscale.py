@@ -6,7 +6,8 @@ import uuid
 import os
 import json
 import traceback
-
+import subprocess
+from services.upscale_service import EXE_PATH
 from services.upscale_service import upscale_image
 
 router = APIRouter()
@@ -74,6 +75,16 @@ def progress(job_id: str):
 # ----------------------------
 # Upscale endpoint
 # ----------------------------
+@router.get("/ldd")
+def ldd_check():
+
+    result = subprocess.run(
+        ["ldd", EXE_PATH],
+        capture_output=True,
+        text=True
+    )
+
+    return {"output": result.stdout}
 
 @router.post("/upscale")
 async def upscale(
