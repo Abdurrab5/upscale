@@ -1,53 +1,52 @@
 import os
 import subprocess
 import json
+from PIL import Image
 
 
-# ----------------------------
-# Progress updater
-# ----------------------------
 def update_progress(job_id, percent, message):
     os.makedirs("progress", exist_ok=True)
 
     with open(f"progress/{job_id}.json", "w") as f:
-        json.dump({
-            "percent": percent,
-            "message": message
-        }, f)
+        json.dump(
+            {
+                "percent": percent,
+                "message": message
+            },
+            f
+        )
 
 
-# ----------------------------
-# OPTIONAL: normalize ONLY if needed
-# ----------------------------
 def normalize_image(input_path):
     ext = os.path.splitext(input_path)[1].lower()
 
-    # skip conversion if already safe format
     if ext in [".png", ".jpg", ".jpeg"]:
         return input_path
 
-    from PIL import Image
-
     img = Image.open(input_path).convert("RGB")
+
     new_path = input_path + "_normalized.png"
+
     img.save(new_path, "PNG")
 
     return new_path
 
 
-# ----------------------------
-# Run Real-ESRGAN
-# ----------------------------
-def run_realesrgan(exe_path, input_path, output_path, scale):
+def run_x4(exe_path, input_path, output_path):
     cmd = [
         exe_path,
         "-i", input_path,
         "-o", output_path,
-        "-s", str(scale),
-        "-n", "realesrgan-x4plus"
+        "-s", "4",
+        "-n", "realesrgan-x4plus",
+        "-j", "4:4:4"
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True
+    )
 
     if result.returncode != 0:
         raise Exception(result.stderr)
@@ -55,24 +54,41 @@ def run_realesrgan(exe_path, input_path, output_path, scale):
     return output_path
 
 
-# ----------------------------
-# 8x pipeline
-# ----------------------------
-def upscale_8x(exe_path, img_path):
-    mid = img_path + "_4x.png"
-    run_realesrgan(exe_path, img_path, mid, 4)
+def generate_multi_scale(x4_image_path, base_path):
+    img = Image.open(x4_image_path)
 
-    final = img_path + "_8x.png"
-    run_realesrgan(exe_path, mid, final, 2)
+    w, h = img.size
 
-    return final
+    path_2x = base_path + "_2x.png"
+    path_4x = base_path + "_4x.png"
+    path_8x = base_path + "_8x.png"
+
+    img.resize(
+        (w // 2, h // 2),
+        Image.LANCZOS
+    ).save(path_2x)
+
+    img.save(path_4x)
+
+    img.resize(
+        (w * 2, h * 2),
+        Image.LANCZOS
+    ).save(path_8x)
+
+    return {
+        "2x": path_2x,
+        "4x": path_4x,
+        "8x": path_8x
+    }
 
 
-# ----------------------------
-# MAIN SERVICE
-# ----------------------------
 def upscale_image(input_path, scale, job_id):
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    BASE_DIR = os.path.dirname(
+        os.path.dirname(
+            os.path.abspath(__file__)
+        )
+    )
 
     exe_path = os.path.join(
         BASE_DIR,
@@ -81,27 +97,36 @@ def upscale_image(input_path, scale, job_id):
     )
 
     if not os.path.exists(exe_path):
-        raise Exception("Real-ESRGAN not found")
+        raise Exception("RealESRGAN executable not found")
 
     update_progress(job_id, 10, "Preparing image")
 
     input_path = normalize_image(input_path)
 
-    update_progress(job_id, 30, "Running AI model")
+    update_progress(job_id, 30, "Running AI upscale")
 
     name, _ = os.path.splitext(input_path)
 
-    if scale in [2, 4]:
-        output_path = f"{name}_{scale}x.png"
-        run_realesrgan(exe_path, input_path, output_path, scale)
+    x4_output = f"{name}_x4_ai.png"
 
-    elif scale == 8:
-        update_progress(job_id, 50, "Running 4x stage")
-        output_path = upscale_8x(exe_path, input_path)
+    run_x4(
+        exe_path,
+        input_path,
+        x4_output
+    )
 
-    else:
-        raise Exception("Unsupported scale")
+    update_progress(job_id, 70, "Generating requested scale")
+
+    outputs = generate_multi_scale(
+        x4_output,
+        name
+    )
+
+    selected = outputs.get(f"{scale}x")
+
+    if not selected:
+        selected = outputs["4x"]
 
     update_progress(job_id, 100, "Done")
 
-    return output_path
+    return selected
