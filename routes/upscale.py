@@ -6,16 +6,21 @@ import uuid
 import os
 import json
 import traceback
+
 from services.upscale_service import upscale_image
 
 router = APIRouter()
 
 PROGRESS_DIR = "progress"
-
 os.makedirs(PROGRESS_DIR, exist_ok=True)
 
 
+# ----------------------------
+# Progress update
+# ----------------------------
+
 def update_progress(job_id, percent, message):
+    os.makedirs(PROGRESS_DIR, exist_ok=True)
 
     with open(f"{PROGRESS_DIR}/{job_id}.json", "w") as f:
         json.dump(
@@ -27,16 +32,22 @@ def update_progress(job_id, percent, message):
         )
 
 
+# ----------------------------
+# Cleanup helper
+# ----------------------------
+
 def clean_files(*paths):
-
     for path in paths:
-
         if path and os.path.exists(path):
             try:
                 os.remove(path)
-            except:
+            except Exception:
                 pass
 
+
+# ----------------------------
+# Progress API
+# ----------------------------
 
 @router.get("/progress/{job_id}")
 def progress(job_id: str):
@@ -53,6 +64,10 @@ def progress(job_id: str):
         return json.load(f)
 
 
+# ----------------------------
+# Upscale endpoint
+# ----------------------------
+
 @router.post("/upscale")
 async def upscale(
     background_tasks: BackgroundTasks,
@@ -65,28 +80,15 @@ async def upscale(
         scale = 4
 
     ext = os.path.splitext(file.filename)[1].lower()
-
     input_path = f"temp_{uuid.uuid4().hex}{ext}"
 
     try:
-
-        update_progress(
-            job_id,
-            5,
-            "Uploading image"
-        )
+        update_progress(job_id, 5, "Uploading image")
 
         with open(input_path, "wb") as buffer:
-            shutil.copyfileobj(
-                file.file,
-                buffer
-            )
+            shutil.copyfileobj(file.file, buffer)
 
-        update_progress(
-            job_id,
-            15,
-            "Processing started"
-        )
+        update_progress(job_id, 15, "Processing started")
 
         output_path = upscale_image(
             input_path,
@@ -95,9 +97,7 @@ async def upscale(
         )
 
         if not os.path.exists(output_path):
-            raise Exception(
-                f"Output not found: {output_path}"
-            )
+            raise Exception(f"Output not found: {output_path}")
 
         with open(output_path, "rb") as f:
             image_bytes = f.read()
@@ -108,24 +108,24 @@ async def upscale(
             output_path
         )
 
-        mime = "image/png"
-
         return Response(
             content=image_bytes,
-            media_type=mime
+            media_type="image/png"
         )
 
     except Exception as e:
-
-        print("❌ UPSCALE ERROR:")
+        print("UPSCALE ERROR:")
         print(traceback.format_exc())
 
-    update_progress(job_id, 0, str(e))
+        try:
+            update_progress(job_id, 0, str(e))
+        except Exception:
+            pass
 
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": True,
-            "message": str(e)
-        }
-    )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": True,
+                "message": str(e)
+            }
+        )
