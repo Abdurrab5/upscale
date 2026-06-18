@@ -14,33 +14,33 @@ BASE_DIR = os.path.dirname(
 # =========================
 
 def get_exe():
-
     system = platform.system()
 
     if system == "Windows":
-
         exe = os.path.join(
             BASE_DIR,
             "realesrgan",
-            "realesrgan-ncnn-cpu"
+            "realesrgan-ncnn-vulkan.exe"
+        )
+    else:
+        exe = os.path.join(
+            BASE_DIR,
+            "realesrgan",
+            "realesrgan-ncnn-vulkan"
         )
 
-        if not os.path.exists(exe):
-            raise Exception(f"Binary not found: {exe}")
+    if not os.path.isfile(exe):
+        raise Exception(
+            f"RealESRGAN binary not found.\n"
+            f"Expected: {exe}\n"
+            f"Platform: {system}"
+        )
 
-        return exe
-
-    exe = os.path.join(
-        BASE_DIR,
-        "realesrgan",
-        "realesrgan-ncnn-vulkan"
-    )
-
-    if not os.path.exists(exe):
-        raise Exception(f"Binary not found: {exe}")
+    # Linux/Railway needs executable permission
+    if system != "Windows":
+        os.chmod(exe, 0o755)
 
     return exe
-
 
 EXE_PATH = get_exe()
 # =========================
