@@ -1,7 +1,8 @@
 [phases.setup]
-aptPkgs = [
-  "libvulkan1",
-  "vulkan-tools",
-  "libglib2.0-0",
-  "libstdc++6"
-]
+aptPkgs = ["libvulkan1", "libgomp1"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[phases.start]
+cmd = "uvicorn main:app --host 0.0.0.0 --port 8000"
