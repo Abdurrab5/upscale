@@ -22,7 +22,7 @@ def get_exe():
         exe = os.path.join(
             BASE_DIR,
             "realesrgan",
-            "realesrgan-ncnn-vulkan.exe"
+            "realesrgan-ncnn-cpu"
         )
 
         if not os.path.exists(exe):
