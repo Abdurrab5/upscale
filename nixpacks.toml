@@ -1,0 +1,7 @@
+[phases.setup]
+aptPkgs = [
+  "libvulkan1",
+  "vulkan-tools",
+  "libglib2.0-0",
+  "libstdc++6"
+]
