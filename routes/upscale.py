@@ -5,7 +5,7 @@ import shutil
 import uuid
 import os
 import json
-
+import traceback
 from services.upscale_service import upscale_image
 
 router = APIRouter()
@@ -117,15 +117,15 @@ async def upscale(
 
     except Exception as e:
 
-        update_progress(
-            job_id,
-            0,
-            str(e)
-        )
+        print("❌ UPSCALE ERROR:")
+        print(traceback.format_exc())
 
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": str(e)
-            }
-        )
+    update_progress(job_id, 0, str(e))
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": True,
+            "message": str(e)
+        }
+    )
